@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { SiteFooter, SiteHeader } from '@/app/_components/chrome'
 import { DEMOS, BUILT_COUNT, SECTOR_COUNT, type Demo, type DemoState } from '@/lib/demos'
-import { isAllowed } from '@/lib/allowlist'
+import { accessibleSlugs } from '@/lib/access'
 import { getUser } from '@/lib/supabase/server'
 
 /**
@@ -17,6 +17,8 @@ function cardChrome(state: DemoState) {
   switch (state) {
     case 'open':
       return { pill: 'Ready', pillClass: 'pill ready', cta: 'Run demonstration', off: false }
+    case 'ask':
+      return { pill: 'Available', pillClass: 'pill ready', cta: 'Request access', off: false }
     case 'request':
       return { pill: 'Available', pillClass: 'pill ready', cta: 'Request access', off: false }
     default:
@@ -24,57 +26,77 @@ function cardChrome(state: DemoState) {
   }
 }
 
-function href(demo: Demo, state: DemoState) {
-  if (state === 'open') return `/demos/${demo.slug}`
-  if (state === 'request') return `/login?next=${encodeURIComponent(`/demos/${demo.slug}`)}`
-  return null
-}
-
 function Card({ demo, state }: { demo: Demo; state: DemoState }) {
   const { pill, pillClass, cta, off } = cardChrome(state)
-  const to = href(demo, state)
 
-  const inner = (
-    <>
-      <div className="body">
-        <div className="hdr">
-          <span className="idx">{demo.idx}</span>
-          <span className={pillClass}>{pill}</span>
-        </div>
-        <h3>{demo.name}</h3>
-        <div className="sector">{demo.sector}</div>
-        <p>{demo.blurb}</p>
-        <dl className="spec">
-          {Object.entries(demo.spec).map(([k, v]) => (
-            <div key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
-        </dl>
+  const body = (
+    <div className="body">
+      <div className="hdr">
+        <span className="idx">{demo.idx}</span>
+        <span className={pillClass}>{pill}</span>
       </div>
-      {cta ? <div className="cta">{cta}</div> : null}
-    </>
+      <h3>{demo.name}</h3>
+      <div className="sector">{demo.sector}</div>
+      <p>{demo.blurb}</p>
+      <dl className="spec">
+        {Object.entries(demo.spec).map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   )
 
-  if (!to) return <div className={off ? 'card off' : 'card'}>{inner}</div>
+  // Built and granted, or built and not signed in: the whole card is a link.
+  if (state === 'open' || state === 'request') {
+    const to =
+      state === 'open'
+        ? `/demos/${demo.slug}`
+        : `/login?next=${encodeURIComponent(`/demos/${demo.slug}`)}`
+    return (
+      <Link className="card" href={to}>
+        {body}
+        <div className="cta">{cta}</div>
+      </Link>
+    )
+  }
 
-  return (
-    <Link className={off ? 'card off' : 'card'} href={to}>
-      {inner}
-    </Link>
-  )
+  // Signed in without a grant. The card cannot be a link, because asking for
+  // access is a form post rather than somewhere to go.
+  if (state === 'ask') {
+    return (
+      <div className="card">
+        {body}
+        <form className="cta-form" method="post" action="/api/access-request">
+          <input type="hidden" name="slug" value={demo.slug} />
+          <button type="submit" className="cta">
+            {cta}
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  return <div className="card off">{body}</div>
 }
 
-export default async function Home() {
+type Search = { requested?: string }
+
+export default async function Home({ searchParams }: { searchParams: Promise<Search> }) {
+  const { requested } = await searchParams
   const user = await getUser()
-  // Rechecked on every load rather than trusted from the session, so that
-  // removing somebody from the allowlist takes effect at once.
-  const admitted = user?.email ? await isAllowed(user.email) : false
+
+  // Rechecked on every load rather than trusted from the session, so removing
+  // a grant takes effect at once.
+  const allowed = user?.email ? await accessibleSlugs(user.email) : []
+  const requestedDemo = DEMOS.find((d) => d.slug === requested && d.built)
 
   const stateFor = (demo: Demo): DemoState => {
     if (!demo.built) return 'soon'
-    return admitted ? 'open' : demo.state
+    if (!user?.email) return 'request'
+    return allowed.includes(demo.slug) ? 'open' : 'ask'
   }
 
   return (
@@ -114,6 +136,14 @@ export default async function Home() {
             diagram.
           </p>
         </div>
+
+        {requestedDemo ? (
+          <p className="asked">
+            Your request for <b>{requestedDemo.name}</b> has been sent. You will get an email when
+            it is switched on.
+          </p>
+        ) : null}
+
         <div className="grid">
           {DEMOS.map((d) => (
             <Card key={d.slug} demo={d} state={stateFor(d)} />

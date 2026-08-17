@@ -5,8 +5,11 @@
   "description": "OT security demonstrations. Public launcher, gated demos.",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "build": "node scripts/check-demos.mjs && next build",
+    "start": "next start",
+    "check-demos": "node scripts/check-demos.mjs",
+    "selftest": "node scripts/selftest.mjs",
+    "publish-demo": "node scripts/publish-demo.mjs"
   },
   "repository": {
     "type": "git",
