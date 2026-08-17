@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# next
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# local env files, never commit these
+.env
+.env*.local
+
+# screenshots from shot.js
+*.png
+shots/
+
+# Demo HTML is never committed. It is served from a private Supabase bucket
+# behind the login, and kept locally for offline on-site presentations.
+demos/
+
+# Internal brief. Names the gaps in the hosting setup, so it does not belong
+# in a public repo.
+CLAUDE-CODE-HANDOVER.md
