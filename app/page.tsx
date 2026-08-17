@@ -1,12 +1,19 @@
 import Link from 'next/link'
-import { DEMOS, BUILT_COUNT, SECTOR_COUNT, type Demo } from '@/lib/demos'
+import { SiteFooter, SiteHeader } from '@/app/_components/chrome'
+import { DEMOS, BUILT_COUNT, SECTOR_COUNT, type Demo, type DemoState } from '@/lib/demos'
+import { isAllowed } from '@/lib/allowlist'
+import { getUser } from '@/lib/supabase/server'
 
 /**
- * The launcher. Stays public, it is the shop window. The demos themselves are
- * gated, so nothing here links straight at a demo file.
+ * The launcher. Stays public, it is the shop window. Nothing here links
+ * straight at a demo file, because there is no demo file to link at.
  */
 
-function cardChrome(state: Demo['state']) {
+// Reads the session cookie to decide what each card offers, so it is rendered
+// per request rather than baked at build time.
+export const dynamic = 'force-dynamic'
+
+function cardChrome(state: DemoState) {
   switch (state) {
     case 'open':
       return { pill: 'Ready', pillClass: 'pill ready', cta: 'Run demonstration', off: false }
@@ -17,15 +24,15 @@ function cardChrome(state: Demo['state']) {
   }
 }
 
-function href(demo: Demo) {
-  if (demo.state === 'open') return `/demos/${demo.slug}`
-  if (demo.state === 'request') return `/login?demo=${demo.slug}`
+function href(demo: Demo, state: DemoState) {
+  if (state === 'open') return `/demos/${demo.slug}`
+  if (state === 'request') return `/login?next=${encodeURIComponent(`/demos/${demo.slug}`)}`
   return null
 }
 
-function Card({ demo }: { demo: Demo }) {
-  const { pill, pillClass, cta, off } = cardChrome(demo.state)
-  const to = href(demo)
+function Card({ demo, state }: { demo: Demo; state: DemoState }) {
+  const { pill, pillClass, cta, off } = cardChrome(state)
+  const to = href(demo, state)
 
   const inner = (
     <>
@@ -59,24 +66,20 @@ function Card({ demo }: { demo: Demo }) {
   )
 }
 
-export default function Home() {
+export default async function Home() {
+  const user = await getUser()
+  // Rechecked on every load rather than trusted from the session, so that
+  // removing somebody from the allowlist takes effect at once.
+  const admitted = user?.email ? await isAllowed(user.email) : false
+
+  const stateFor = (demo: Demo): DemoState => {
+    if (!demo.built) return 'soon'
+    return admitted ? 'open' : demo.state
+  }
+
   return (
     <>
-      <div className="top">
-        <div className="wrap">
-          <a className="logo" href="/">
-            Industrial<span>Cyber</span>
-            <i></i>
-          </a>
-          <nav>
-            <a href="#demos" aria-current="page">
-              Demonstrations
-            </a>
-            <a href="#how">How they work</a>
-            <a href="mailto:info@trustscope.co.uk">Contact</a>
-          </nav>
-        </div>
-      </div>
+      <SiteHeader email={user?.email} onDemos />
 
       <section className="hero">
         <div className="wrap">
@@ -113,7 +116,7 @@ export default function Home() {
         </div>
         <div className="grid">
           {DEMOS.map((d) => (
-            <Card key={d.slug} demo={d} />
+            <Card key={d.slug} demo={d} state={stateFor(d)} />
           ))}
         </div>
       </div>
@@ -155,16 +158,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer>
-        <div className="wrap">
-          <span>IndustrialCyber</span>
-          <span className="sp"></span>
-          <span>
-            Simulated data. Representative of each sector, not any individual operator&apos;s plant.
-          </span>
-          <a href="mailto:info@trustscope.co.uk">Contact</a>
-        </div>
-      </footer>
+      <SiteFooter />
     </>
   )
 }

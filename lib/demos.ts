@@ -32,7 +32,7 @@ export const DEMOS: Demo[] = [
     name: 'Syrup room',
     sector: 'Food and beverage',
     built: true,
-    state: 'soon',
+    state: 'request',
     blurb:
       'Blending and CIP for a soft drinks line. A paid insider plugs a USB stick into an operator panel and the plant goes blind while the PLCs keep running.',
     spec: {
