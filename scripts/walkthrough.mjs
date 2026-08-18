@@ -26,6 +26,7 @@ const db = createClient(required('NEXT_PUBLIC_SUPABASE_URL'), required('SUPABASE
 })
 
 const results = []
+let requestRows = []
 
 function report(state, detail) {
   results.push({ state, ...detail })
@@ -56,10 +57,12 @@ async function refuseIfLive() {
     .not('email', 'like', '%@example.invalid')
   if (error) throw new Error(error.message)
   if (data.length) {
-    console.error(`\nRefusing to run: ${data.length} real people are on the allowlist.`)
+    const who = data.length === 1 ? 'person is' : 'people are'
+    console.error(`\nRefusing to run: ${data.length} real ${who} on the allowlist.`)
     console.error('This creates and deletes a person. Use a scratch project, or --force.\n')
-    process.exit(1)
+    return false
   }
+  return true
 }
 
 async function signedInPage(browser) {
@@ -108,7 +111,10 @@ async function probe(context, page, shot) {
 }
 
 async function main() {
-  await refuseIfLive()
+  if (!(await refuseIfLive())) {
+    process.exitCode = 1
+    return
+  }
   const owner = await ownerId()
   const browser = await chromium.launch()
 
@@ -153,6 +159,23 @@ async function main() {
       '4. grant expired',
       await probe(session.context, session.page, 'shots/state-4-expired.png'),
     )
+
+    // 5. from that same no access session, ask for it
+    const before = await db.from('access_requests').select('id').eq('email', WHO)
+    await session.page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    await session.page.click('form[action="/api/access-request"] button[type=submit]')
+    await session.page.waitForURL(/requested=/, { timeout: 30_000 })
+    await session.page.screenshot({ path: 'shots/state-5-requested.png' })
+    const after = await db.from('access_requests').select('id, email, demo_slug').eq('email', WHO)
+
+    report('5. asked for access', {
+      landedOn: new URL(session.page.url()).search,
+      rowsBefore: before.data?.length ?? 0,
+      rowsAfter: after.data?.length ?? 0,
+      recorded: after.data?.[0] ? `${after.data[0].email} -> ${after.data[0].demo_slug}` : '(none)',
+    })
+    requestRows = (after.data ?? []).map((r) => r.id)
+
     await session.context.close()
   } finally {
     await browser.close()
@@ -160,7 +183,15 @@ async function main() {
     const { data: users } = await db.auth.admin.listUsers()
     const test = users?.users?.find((u) => u.email === WHO)
     if (test) await db.auth.admin.deleteUser(test.id)
-    console.log(`\ncleaned up ${WHO}`)
+
+    // Access requests survive the person being deleted, because person_id is
+    // set to null rather than cascading. That is deliberate for a real request
+    // and unwanted for a test, so this one is removed by hand.
+    if (requestRows.length) {
+      await db.from('access_requests').delete().in('id', requestRows)
+      console.log(`removed ${requestRows.length} test access request row(s)`)
+    }
+    console.log(`cleaned up ${WHO}`)
   }
 
   const expected = [
