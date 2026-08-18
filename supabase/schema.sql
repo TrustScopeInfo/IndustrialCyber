@@ -459,7 +459,47 @@ end $$;
 -- the whole thing back and the test cannot leave anything behind, not even the
 -- synthetic rows it created, and not even if it fails half way through.
 --
--- Run them with: node scripts/selftest.mjs
+-- Run them with: npm run selftest
+--
+-- They also refuse to run at all once this is a live system. Creating synthetic
+-- admins, demoting every admin in one statement and deleting the last one are
+-- reasonable things to do to an empty database and not reasonable things to do
+-- to one with customers in it, however carefully the transaction is rolled
+-- back. The check is inside the functions rather than in the script, so it
+-- cannot be got round by calling the function from somewhere else.
+
+create or replace function public.assert_selftest_is_safe()
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  customers int;
+  seen      int;
+  requests  int;
+begin
+  -- Real people are those who are not administrators and not the synthetic
+  -- addresses the tests themselves use. Administrators do not count, because
+  -- there has to be at least one of those before anything works at all.
+  select count(*) into customers from allowlist
+   where not is_super_admin and email not like '%@example.invalid';
+
+  select count(*) into seen     from demo_views;
+  select count(*) into requests from access_requests;
+
+  if customers > 0 or seen > 0 or requests > 0 then
+    raise exception 'SELFTEST REFUSED|%', format(
+      'This database is in use: %s people on the allowlist who are not administrators, '
+      || '%s recorded demo views, %s access requests.'
+      || chr(10) || chr(10)
+      || 'These tests create synthetic administrators, demote every administrator in one '
+      || 'statement and delete the last one. That is fine on an empty database and not fine '
+      || 'here, whatever the transaction does afterwards.'
+      || chr(10) || chr(10)
+      || 'Run them against a scratch Supabase project instead.',
+      customers, seen, requests)
+      using errcode = 'insufficient_privilege';
+  end if;
+end $$;
+
 
 create or replace function public.selftest_admin_guard()
 returns void
@@ -472,6 +512,8 @@ declare
   refused  boolean;
   passed   boolean := true;
 begin
+  perform assert_selftest_is_safe();
+
   -- Three synthetic admins, so the test does not depend on a real one already
   -- existing and gives the same answer on an empty database.
   insert into allowlist (email, note, is_super_admin) values
@@ -560,8 +602,9 @@ declare
   v_actor  uuid;
   v_new    uuid;
   n        int;
-  msg      text;
 begin
+  perform assert_selftest_is_safe();
+
   insert into allowlist (email, note, is_super_admin)
   values ('selftest-admin@example.invalid', 'self test', true)
   returning id into v_actor;
@@ -709,6 +752,7 @@ revoke execute on function
   public.grant_demo(uuid, text, text, timestamptz),
   public.revoke_demo(uuid, text, text),
   public.log_demo_view(uuid, text),
+  public.assert_selftest_is_safe(),
   public.selftest_admin_guard(),
   public.selftest_access_functions()
 from public, anon, authenticated;
@@ -724,6 +768,7 @@ grant execute on function
   public.grant_demo(uuid, text, text, timestamptz),
   public.revoke_demo(uuid, text, text),
   public.log_demo_view(uuid, text),
+  public.assert_selftest_is_safe(),
   public.selftest_admin_guard(),
   public.selftest_access_functions()
 to service_role;

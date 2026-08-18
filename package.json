@@ -9,7 +9,9 @@
     "start": "next start",
     "check-demos": "node scripts/check-demos.mjs",
     "selftest": "node scripts/selftest.mjs",
-    "publish-demo": "node scripts/publish-demo.mjs"
+    "publish-demo": "node scripts/publish-demo.mjs",
+    "walkthrough": "node scripts/walkthrough.mjs",
+    "db-state": "node scripts/db-state.mjs"
   },
   "repository": {
     "type": "git",

@@ -32,10 +32,11 @@ async function run(db, name) {
     return false
   }
 
-  const [verdict, ...rest] = message.slice(at + MARKER.length).split('|')
+  const [rawVerdict, ...rest] = message.slice(at + MARKER.length).split('|')
+  const verdict = rawVerdict.trim()
   console.log(rest.join('|').trim())
-  console.log(`\nverdict: ${verdict.trim()}`)
-  return verdict.trim() === 'PASS'
+  console.log(`\nverdict: ${verdict}`)
+  return verdict
 }
 
 async function main() {
@@ -51,10 +52,21 @@ async function main() {
   }
 
   console.log(`\n${'='.repeat(64)}`)
-  if (results.every(Boolean)) {
+
+  if (results.every((v) => v === 'PASS')) {
     console.log('All self tests passed. Nothing was left behind.')
     return
   }
+
+  // Refused is not the same as failed. The guard is working, it has simply
+  // decided this database has real people in it and is not a test subject.
+  if (results.every((v) => v === 'REFUSED')) {
+    console.log('Self tests REFUSED to run against this database. Nothing was touched.')
+    console.log('This is the guard doing its job, not a failure of the code it tests.')
+    process.exitCode = 2
+    return
+  }
+
   console.log('Self tests FAILED. Nothing was left behind.')
   process.exitCode = 1
 }
