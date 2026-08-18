@@ -1,7 +1,7 @@
 -- ============================================================================
 -- IndustrialCyber access control
 --
--- SCHEMA VERSION: 2026-08-18a
+-- SCHEMA VERSION: 2026-08-18b
 --
 -- Run this in the Supabase dashboard: SQL Editor, New query, paste, Run.
 -- It is safe to run again. Nothing here deletes data.
@@ -493,8 +493,10 @@ begin
 
   if customers > 0 or seen > 0 or requests > 0 then
     raise exception 'SELFTEST REFUSED|%', format(
-      'This database is in use: %s people on the allowlist who are not administrators, '
-      || '%s recorded demo views, %s access requests.'
+      'This database is in use.'
+      || chr(10) || '  on the allowlist and not an administrator: %s'
+      || chr(10) || '  recorded demo views: %s'
+      || chr(10) || '  access requests: %s'
       || chr(10) || chr(10)
       || 'These tests create synthetic administrators, demote every administrator in one '
       || 'statement and delete the last one. That is fine on an empty database and not fine '
@@ -834,5 +836,5 @@ create table if not exists public.schema_meta (
 
 alter table public.schema_meta enable row level security;
 
-insert into public.schema_meta (id, version) values (1, '2026-08-18a')
+insert into public.schema_meta (id, version) values (1, '2026-08-18b')
 on conflict (id) do update set version = excluded.version, applied_at = now();
