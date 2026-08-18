@@ -15,7 +15,8 @@
     "person": "node scripts/person.mjs",
     "apply-schema": "node scripts/apply-schema.mjs",
     "diagnose-db": "node scripts/diagnose-db.mjs",
-    "apply-via-rpc": "node scripts/apply-via-rpc.mjs"
+    "apply-via-rpc": "node scripts/apply-via-rpc.mjs",
+    "snapshot-demo": "node scripts/snapshot-demo.mjs"
   },
   "repository": {
     "type": "git",
