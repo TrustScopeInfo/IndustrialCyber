@@ -6,15 +6,28 @@
 //
 // Reports three fault classes:
 //   TEXT/TEXT  two labels overlapping each other
-//   TEXT/BOX   a label overlapping a box it is not inside, so it is clipped
-//              or sitting across an edge it does not belong to
+//   TEXT/BOX   a label hidden by a box, or straddling the edge of one so half
+//              the word sits on a different background
 //   TEXT/PIPE  a label sitting on a pipe run
 //
 // It measures the rendered page in a real browser rather than estimating from
-// source. The previous version stubbed the DOM and guessed text widths from a
+// source. An earlier version stubbed the DOM and guessed text widths from a
 // table of narrow and wide characters, which is a better idea than reading the
 // source with a regex and still not a measurement. getBBox on a laid out text
 // element is the actual extent of the actual glyphs in the actual font.
+//
+// Two stages, because a bounding box is still not the same thing as paint:
+//
+//   1. Candidates. Bounding boxes in viewBox units. Cheap, and it misses
+//      nothing, because a shape can only paint inside its own box.
+//   2. Confirmation. Every candidate is hit tested with elementsFromPoint on a
+//      grid across the label's glyphs. That respects clip paths, real curved
+//      geometry and draw order.
+//
+// Stage one on its own reported four faults on the blend screen that were not
+// on the screen. The concentrate level is a rectangle clipped to the hopper
+// cone, so its bounding box claims two corners it never paints, and the KG
+// labels sit in one of them. Stage two drops those and keeps the real ones.
 //
 // All coordinates are reported in viewBox units, 0 to 1600 across and 0 to 1000
 // down, so they match the numbers in the source rather than screen pixels.
@@ -30,12 +43,30 @@ const TABS = {
   net: { panel: 'p-net', name: 'Zones and conduits' },
 }
 
-/** Runs inside the browser. Returns geometry in viewBox units. */
+/** Runs inside the browser. Returns geometry in viewBox units, and stamps every
+ *  measured element with data-audit so stage two can find it again. */
 function measure(panelId) {
   const panel = document.getElementById(panelId)
   if (!panel) return { error: `no panel #${panelId}` }
   const svg = panel.querySelector('svg')
   if (!svg) return { error: `no svg inside #${panelId}` }
+
+  document.querySelectorAll('[data-audit]').forEach((n) => n.removeAttribute('data-audit'))
+  document.querySelectorAll('[data-audit-root]').forEach((n) => n.removeAttribute('data-audit-root'))
+  svg.setAttribute('data-audit-root', '1')
+  let seq = 0
+  const stamp = (el) => {
+    const i = seq++
+    el.setAttribute('data-audit', String(i))
+    return i
+  }
+
+  // Anything inside a clipPath, a defs or a marker is a definition, not paint.
+  const isDefinition = (el) => !!el.closest('clipPath, defs, marker, mask, pattern, symbol')
+
+  // SVG paints in document order and has no z-index, so this is paint order.
+  const order = new Map()
+  Array.prototype.forEach.call(svg.querySelectorAll('*'), (el, n) => order.set(el, n))
 
   const vb = svg.viewBox.baseVal
   const root = svg.getScreenCTM()
@@ -77,26 +108,30 @@ function measure(panelId) {
 
   const texts = []
   for (const el of svg.querySelectorAll('text')) {
+    if (isDefinition(el)) continue
     const label = (el.textContent || '').trim()
     if (!label) continue
     const cs = getComputedStyle(el)
     if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue
     const b = boxOf(el)
-    if (b) texts.push({ label, ...b })
+    if (b) texts.push({ i: stamp(el), o: order.get(el), label, ...b })
   }
 
   const canvasArea = vb.width * vb.height
   const boxes = []
-  for (const el of svg.querySelectorAll('rect')) {
+  for (const el of svg.querySelectorAll('rect, ellipse, circle')) {
+    if (isDefinition(el)) continue
     const cs = getComputedStyle(el)
     const fill = cs.fill
     if (!fill || fill === 'none' || fill === 'rgba(0, 0, 0, 0)') continue
     if (parseFloat(cs.fillOpacity) === 0) continue
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue
     const b = boxOf(el)
     if (!b) continue
     // The lavender canvas and any full width banding are not boxes that clip.
     if ((b.x2 - b.x1) * (b.y2 - b.y1) > canvasArea * 0.5) continue
-    boxes.push({ fill, ...b })
+    const solid = parseFloat(cs.fillOpacity || '1') > 0.85 && parseFloat(cs.opacity || '1') > 0.85
+    boxes.push({ i: stamp(el), o: order.get(el), fill, solid, ...b })
   }
 
   // Pipes are thick stroked paths. Sample along each one so an L shaped run is
@@ -106,6 +141,7 @@ function measure(panelId) {
   // are line elements. Both are thick strokes that a label must not sit on.
   const pipes = []
   for (const el of svg.querySelectorAll('path, line, polyline')) {
+    if (isDefinition(el)) continue
     const cs = getComputedStyle(el)
     // A filled path with a thick outline is a vessel, not a run. Line and
     // polyline have a default fill that never paints, so the test is skipped.
@@ -128,6 +164,7 @@ function measure(panelId) {
     }
     if (!total) continue
 
+    const idx = stamp(el)
     const step = Math.max(2, total / 400)
     const pt = svg.createSVGPoint()
     let prev = null
@@ -138,6 +175,7 @@ function measure(panelId) {
       const p = pt.matrixTransform(m)
       if (prev) {
         pipes.push({
+          i: idx,
           x1: Math.min(prev.x, p.x) - half,
           x2: Math.max(prev.x, p.x) + half,
           y1: Math.min(prev.y, p.y) - half,
@@ -151,6 +189,64 @@ function measure(panelId) {
   return { viewBox: { w: vb.width, h: vb.height }, texts, boxes, pipes }
 }
 
+/** Stage two. Runs inside the browser. For each candidate pair it hit tests a
+ *  grid across the label's glyphs and reports what is really painted there.
+ *  Verdicts: over, straddle, on, clear. */
+function confirmPairs(pairs) {
+  const svg = document.querySelector('[data-audit-root]')
+  const find = (i) => svg.querySelector(`[data-audit="${i}"]`)
+  const stackAt = (x, y) => document.elementsFromPoint(x, y).filter((n) => svg.contains(n))
+
+  // An opaque shape between a label and whatever lies under it means the label
+  // is reading against that shape, not against the thing behind it.
+  const opaque = (n) => {
+    if (n.tagName === 'text') return false
+    const cs = getComputedStyle(n)
+    if (!cs.fill || cs.fill === 'none' || cs.fill === 'rgba(0, 0, 0, 0)') return false
+    return parseFloat(cs.fillOpacity || '1') > 0.85 && parseFloat(cs.opacity || '1') > 0.85
+  }
+
+  // A grid over the label, fine enough that a thin pipe crossing one letter is
+  // sampled, capped so a long label does not cost thousands of hit tests.
+  const grid = (el) => {
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height) return []
+    const nx = Math.max(2, Math.min(80, Math.round(r.width / 2)))
+    const ny = Math.max(2, Math.min(16, Math.round(r.height / 2)))
+    const pts = []
+    for (let a = 0; a < nx; a++) {
+      for (let b = 0; b < ny; b++) {
+        pts.push([r.left + ((a + 0.5) * r.width) / nx, r.top + ((b + 0.5) * r.height) / ny])
+      }
+    }
+    return pts
+  }
+
+  return pairs.map(({ ti, oi }) => {
+    const T = find(ti)
+    const O = find(oi)
+    if (!T || !O) return 'clear'
+    let glyph = 0
+    let over = 0
+    let exposed = 0
+    for (const [x, y] of grid(T)) {
+      const st = stackAt(x, y)
+      const it = st.indexOf(T)
+      if (it < 0) continue // nothing of the label is painted at this point
+      glyph++
+      const io = st.indexOf(O)
+      if (io < 0) continue
+      if (io < it) over++ // the other shape is painted on top of the label
+      else if (!st.slice(it + 1, io).some(opaque)) exposed++
+    }
+    if (!glyph) return 'clear'
+    if (over) return 'over'
+    if (!exposed) return 'clear' // shielded by something opaque in between
+    if (exposed === glyph) return 'on' // the label sits wholly on the other shape
+    return 'straddle' // part of the label on it, part off it
+  })
+}
+
 const TOL = 1 // viewBox units of slack, so a hairline touch is not a fault
 const overlaps = (a, b) => a.x1 + TOL < b.x2 && b.x1 + TOL < a.x2 && a.y1 + TOL < b.y2 && b.y1 + TOL < a.y2
 const contains = (inner, outer) =>
@@ -158,35 +254,61 @@ const contains = (inner, outer) =>
 
 const at = (b) => `@${Math.round(b.x1)},${Math.round(b.y1)}`
 
-function findFaults({ texts, boxes, pipes }) {
-  const faults = { 'TEXT/TEXT': [], 'TEXT/BOX': [], 'TEXT/PIPE': [] }
+/** Bounding box pass. Text on text is settled here, because nothing can be
+ *  painted between two labels that would make the overlap acceptable. The other
+ *  two classes only produce candidates for the hit test to confirm or drop. */
+function candidates({ texts, boxes, pipes }) {
+  const settled = []
+  const pairs = []
 
   for (let i = 0; i < texts.length; i++) {
     const t = texts[i]
 
     for (let j = i + 1; j < texts.length; j++) {
       if (overlaps(t, texts[j])) {
-        faults['TEXT/TEXT'].push(`"${t.label}" ${at(t)} over "${texts[j].label}" ${at(texts[j])}`)
+        settled.push(['TEXT/TEXT', `"${t.label}" ${at(t)} over "${texts[j].label}" ${at(texts[j])}`])
       }
     }
 
     for (const box of boxes) {
-      if (overlaps(t, box) && !contains(t, box)) {
-        faults['TEXT/BOX'].push(`"${t.label}" ${at(t)} across the edge of a ${box.fill} box ${at(box)}`)
+      if (!overlaps(t, box)) continue
+      if (contains(t, box)) {
+        // A label inside a box is normally a label on that box. It is only a
+        // fault when the box is painted after the label, which buries it.
+        if (box.solid && box.o > t.o) {
+          settled.push(['TEXT/BOX', `"${t.label}" ${at(t)} is buried under a ${box.fill} box ${at(box)}`])
+        }
+        continue
+      }
+      {
+        pairs.push({
+          kind: 'TEXT/BOX',
+          ti: t.i,
+          oi: box.i,
+          say: (v) =>
+            v === 'over'
+              ? `"${t.label}" ${at(t)} is painted over by a ${box.fill} box ${at(box)}`
+              : `"${t.label}" ${at(t)} straddles the edge of a ${box.fill} box ${at(box)}`,
+        })
       }
     }
 
-    // A label sitting inside an opaque box is visually on the box, whatever
-    // runs underneath it, so it is not on a pipe.
-    const shielded = boxes.some((box) => contains(t, box))
-    if (!shielded) {
-      const hit = pipes.find((p) => overlaps(t, p))
-      if (hit) faults['TEXT/PIPE'].push(`"${t.label}" ${at(t)} sits on a pipe`)
+    // One candidate per pipe element, not one per sampled segment.
+    const seen = new Set()
+    for (const p of pipes) {
+      if (!seen.has(p.i) && overlaps(t, p)) seen.add(p.i)
+    }
+    for (const oi of seen) {
+      pairs.push({
+        kind: 'TEXT/PIPE',
+        ti: t.i,
+        oi,
+        say: (v) => (v === 'over' ? `"${t.label}" ${at(t)} is crossed by a pipe` : `"${t.label}" ${at(t)} sits on a pipe`),
+      })
     }
   }
 
-  for (const key of Object.keys(faults)) faults[key] = [...new Set(faults[key])]
-  return faults
+  return { settled, pairs }
 }
 
 async function main() {
@@ -233,9 +355,37 @@ async function main() {
       for (const t of data.texts) console.log(`  label "${t.label}" ${at(t)}`)
     }
 
-    const faults = findFaults(data)
+    const { settled, pairs } = candidates(data)
+    const verdicts = pairs.length
+      ? await page.evaluate(
+          confirmPairs,
+          pairs.map(({ ti, oi }) => ({ ti, oi })),
+        )
+      : []
+
+    const faults = { 'TEXT/TEXT': [], 'TEXT/BOX': [], 'TEXT/PIPE': [] }
+    for (const [kind, line] of settled) faults[kind].push(line)
+
+    let dropped = 0
+    pairs.forEach((p, n) => {
+      const v = verdicts[n]
+      // A label sitting wholly on a box, painted on top of it, is a label on a
+      // background. That is only a fault when the thing underneath is a pipe.
+      if (v === 'clear' || (p.kind === 'TEXT/BOX' && v === 'on')) {
+        dropped++
+        return
+      }
+      faults[p.kind].push(p.say(v))
+    })
+
+    for (const key of Object.keys(faults)) faults[key] = [...new Set(faults[key])]
+
     const count = Object.values(faults).reduce((n, list) => n + list.length, 0)
     total += count
+
+    if (verbose && dropped) {
+      console.log(`  ${dropped} of ${pairs.length} bounding box candidate(s) dropped by the hit test`)
+    }
 
     if (!count) {
       console.log('\nclean')
