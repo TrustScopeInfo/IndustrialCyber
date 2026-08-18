@@ -11,7 +11,8 @@
     "selftest": "node scripts/selftest.mjs",
     "publish-demo": "node scripts/publish-demo.mjs",
     "walkthrough": "node scripts/walkthrough.mjs",
-    "db-state": "node scripts/db-state.mjs"
+    "db-state": "node scripts/db-state.mjs",
+    "person": "node scripts/person.mjs"
   },
   "repository": {
     "type": "git",

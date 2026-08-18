@@ -11,7 +11,10 @@
 export async function notifyOwner(subject: string, lines: string[]): Promise<boolean> {
   const key = process.env.RESEND_API_KEY
   const to = process.env.OWNER_EMAIL ?? 'info@trustscope.co.uk'
-  const from = process.env.NOTIFY_FROM ?? 'IndustrialCyber <noreply@industrialcyber.co.uk>'
+  // Sent from the verified subdomain, but replies go to a mailbox that is
+  // actually read. Nobody should ever have to reply to a noreply address.
+  const from = process.env.NOTIFY_FROM ?? 'IndustrialCyber <noreply@send.industrialcyber.co.uk>'
+  const replyTo = process.env.REPLY_TO ?? 'info@trustscope.co.uk'
 
   if (!key) {
     console.log(`[notify, not sent, no RESEND_API_KEY] ${subject} :: ${lines.join(' | ')}`)
@@ -28,6 +31,7 @@ export async function notifyOwner(subject: string, lines: string[]): Promise<boo
       body: JSON.stringify({
         from,
         to: [to],
+        reply_to: replyTo,
         subject,
         text: lines.join('\n'),
       }),

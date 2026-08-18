@@ -1,8 +1,14 @@
 -- ============================================================================
 -- IndustrialCyber access control
 --
+-- SCHEMA VERSION: 2026-08-18a
+--
 -- Run this in the Supabase dashboard: SQL Editor, New query, paste, Run.
 -- It is safe to run again. Nothing here deletes data.
+--
+-- Paste the WHOLE file. The last thing it does is record the version above in
+-- the schema_meta table, and the build checks that the database agrees with
+-- the code, so a partial or stale paste is caught rather than assumed.
 --
 -- Sections:
 --   1  people                      who may sign in
@@ -794,3 +800,39 @@ on conflict (email) do update
 --
 --   select revoke_demo('<your-id>'::uuid, 'someone@example.com', 'syrup-room');
 --   select remove_person('<your-id>'::uuid, 'someone@example.com');
+
+
+-- 12. Keep alive -------------------------------------------------------------
+--
+-- Supabase pauses a free tier project after seven days without activity, and a
+-- paused project means nobody can sign in. A Vercel cron writes to this row
+-- once a day. One row, and it is meant to stay that way.
+
+create table if not exists public.keep_alive (
+  id  smallint primary key default 1,
+  at  timestamptz not null default now(),
+  constraint keep_alive_is_one_row check (id = 1)
+);
+
+insert into public.keep_alive (id) values (1) on conflict (id) do nothing;
+
+alter table public.keep_alive enable row level security;
+
+
+-- 13. Schema version ---------------------------------------------------------
+--
+-- Deliberately the last thing in the file. It is only reached if everything
+-- above it ran, so the version recorded here is a version that actually
+-- applied, not one that was pasted.
+
+create table if not exists public.schema_meta (
+  id          smallint primary key default 1,
+  version     text not null,
+  applied_at  timestamptz not null default now(),
+  constraint schema_meta_is_one_row check (id = 1)
+);
+
+alter table public.schema_meta enable row level security;
+
+insert into public.schema_meta (id, version) values (1, '2026-08-18a')
+on conflict (id) do update set version = excluded.version, applied_at = now();

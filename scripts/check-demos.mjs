@@ -6,7 +6,7 @@
 // way to grant it, and neither failure looks like what it is. So the build
 // stops here instead.
 //
-// Set SKIP_DEMO_CATALOGUE_CHECK=1 to get past it, for the case where Supabase
+// Set SKIP_DB_CHECKS=1 to get past it, for the case where Supabase
 // is unreachable and you need to ship anyway.
 
 import { readFileSync } from 'node:fs'
@@ -22,8 +22,8 @@ function fail(...lines) {
 }
 
 async function main() {
-  if (process.env.SKIP_DEMO_CATALOGUE_CHECK === '1') {
-    console.log('demo catalogue check skipped by SKIP_DEMO_CATALOGUE_CHECK=1')
+  if (process.env.SKIP_DB_CHECKS === '1') {
+    console.log('database checks skipped by SKIP_DB_CHECKS=1')
     return
   }
 
@@ -55,13 +55,49 @@ async function main() {
   }
 
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+
+  // Is the database running the schema this code was written against? Pasting
+  // a stale copy into the SQL editor looks like success and behaves like a
+  // subtle bug, so it is checked rather than trusted.
+  const schemaFile = readFileSync(join(projectRoot, 'supabase', 'schema.sql'), 'utf8')
+  const wanted = schemaFile.match(/^--\s*SCHEMA VERSION:\s*(\S+)/m)?.[1]
+
+  if (!wanted) {
+    return fail(
+      'No SCHEMA VERSION line found in supabase/schema.sql.',
+      'Fix the file or this check before trusting a pass.',
+    )
+  }
+
+  const meta = await db.from('schema_meta').select('version, applied_at').maybeSingle()
+
+  if (meta.error) {
+    return fail(
+      `Could not read schema_meta: ${meta.error.message}`,
+      `The database has not had supabase/schema.sql version ${wanted} applied.`,
+      'Paste the whole of supabase/schema.sql into the Supabase SQL editor and run it.',
+    )
+  }
+
+  if (meta.data?.version !== wanted) {
+    return fail(
+      'The database is running an older schema than this code expects.',
+      `  database: ${meta.data?.version ?? '(none recorded)'}`,
+      `  code:     ${wanted}`,
+      '',
+      'Paste the whole of supabase/schema.sql into the Supabase SQL editor and run it.',
+    )
+  }
+
+  console.log(`schema version ${wanted}, applied ${meta.data.applied_at}`)
+
   const { data, error } = await db.from('demos').select('slug')
 
   if (error) {
     return fail(
       `Could not read the demos table: ${error.message}`,
       'Has supabase/schema.sql been run in the Supabase SQL editor?',
-      'If Supabase is simply down, SKIP_DEMO_CATALOGUE_CHECK=1 will get you past it.',
+      'If Supabase is simply down, SKIP_DB_CHECKS=1 will get you past it.',
     )
   }
 
