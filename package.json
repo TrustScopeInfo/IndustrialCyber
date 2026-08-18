@@ -13,7 +13,9 @@
     "walkthrough": "node scripts/walkthrough.mjs",
     "db-state": "node scripts/db-state.mjs",
     "person": "node scripts/person.mjs",
-    "apply-schema": "node scripts/apply-schema.mjs"
+    "apply-schema": "node scripts/apply-schema.mjs",
+    "diagnose-db": "node scripts/diagnose-db.mjs",
+    "apply-via-rpc": "node scripts/apply-via-rpc.mjs"
   },
   "repository": {
     "type": "git",
