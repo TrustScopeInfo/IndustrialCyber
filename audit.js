@@ -1,6 +1,6 @@
 // Layout audit for the demo mimics.
 //
-//   node audit.js                 audits proc, cip and net
+//   node audit.js                 audits every drawn page: proc, cip, arch, na, net
 //   node audit.js proc            audits one tab
 //   node audit.js proc --verbose  lists every measured element too
 //
@@ -40,6 +40,8 @@ const FILE = path.resolve(__dirname, 'demos', 'syrup-room', 'index.html')
 const TABS = {
   proc: { panel: 'p-proc', name: 'T470_T471 blend' },
   cip: { panel: 'p-cip', name: 'CIP 497' },
+  arch: { panel: 'p-arch', name: 'System Platform infrastructure' },
+  na: { panel: 'p-na', name: 'Network architecture' },
   net: { panel: 'p-net', name: 'Zones and conduits' },
 }
 
@@ -63,6 +65,14 @@ function measure(panelId) {
 
   // Anything inside a clipPath, a defs or a marker is a definition, not paint.
   const isDefinition = (el) => !!el.closest('clipPath, defs, marker, mask, pattern, symbol')
+
+  // An SVG element inside a display:none group still reports its own computed
+  // display as visible, still returns a real getBBox and still returns a
+  // getScreenCTM. Only its client rects go away. So the state dependent layers
+  // on the network architecture page all measured as if they were on screen at
+  // once, and the audit reported the flat caption overlapping the FortiGate
+  // that replaces it. This is the test that actually means "on the screen".
+  const rendered = (el) => el.getClientRects().length > 0
 
   // SVG paints in document order and has no z-index, so this is paint order.
   const order = new Map()
@@ -108,11 +118,11 @@ function measure(panelId) {
 
   const texts = []
   for (const el of svg.querySelectorAll('text')) {
-    if (isDefinition(el)) continue
+    if (isDefinition(el) || !rendered(el)) continue
     const label = (el.textContent || '').trim()
     if (!label) continue
     const cs = getComputedStyle(el)
-    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue
+    if (cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue
     const b = boxOf(el)
     if (b) texts.push({ i: stamp(el), o: order.get(el), label, ...b })
   }
@@ -120,7 +130,7 @@ function measure(panelId) {
   const canvasArea = vb.width * vb.height
   const boxes = []
   for (const el of svg.querySelectorAll('rect, ellipse, circle')) {
-    if (isDefinition(el)) continue
+    if (isDefinition(el) || !rendered(el)) continue
     const cs = getComputedStyle(el)
     const fill = cs.fill
     if (!fill || fill === 'none' || fill === 'rgba(0, 0, 0, 0)') continue
@@ -141,7 +151,7 @@ function measure(panelId) {
   // are line elements. Both are thick strokes that a label must not sit on.
   const pipes = []
   for (const el of svg.querySelectorAll('path, line, polyline')) {
-    if (isDefinition(el)) continue
+    if (isDefinition(el) || !rendered(el)) continue
     const cs = getComputedStyle(el)
     // A filled path with a thick outline is a vessel, not a run. Line and
     // polyline have a default fill that never paints, so the test is skipped.
@@ -206,13 +216,14 @@ function confirmPairs(pairs) {
     return parseFloat(cs.fillOpacity || '1') > 0.85 && parseFloat(cs.opacity || '1') > 0.85
   }
 
-  // A grid over the label, fine enough that a thin pipe crossing one letter is
-  // sampled, capped so a long label does not cost thousands of hit tests.
+  // A grid over the label, roughly one sample per rendered pixel. Coarser than
+  // that and a box whose edge only clips the descenders is missed, because the
+  // sample rows step straight over the two pixels of the g and the y.
   const grid = (el) => {
     const r = el.getBoundingClientRect()
     if (!r.width || !r.height) return []
-    const nx = Math.max(2, Math.min(80, Math.round(r.width / 2)))
-    const ny = Math.max(2, Math.min(16, Math.round(r.height / 2)))
+    const nx = Math.max(3, Math.min(160, Math.round(r.width)))
+    const ny = Math.max(3, Math.min(40, Math.round(r.height)))
     const pts = []
     for (let a = 0; a < nx; a++) {
       for (let b = 0; b < ny; b++) {

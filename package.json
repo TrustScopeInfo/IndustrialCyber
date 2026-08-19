@@ -4,9 +4,9 @@
   "private": true,
   "description": "OT security demonstrations. Public launcher, gated demos.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3200",
     "build": "node scripts/check-demos.mjs && next build",
-    "start": "next start",
+    "start": "next start -p 3200",
     "check-demos": "node scripts/check-demos.mjs",
     "selftest": "node scripts/selftest.mjs",
     "publish-demo": "node scripts/publish-demo.mjs",
@@ -16,7 +16,9 @@
     "apply-schema": "node scripts/apply-schema.mjs",
     "diagnose-db": "node scripts/diagnose-db.mjs",
     "apply-via-rpc": "node scripts/apply-via-rpc.mjs",
-    "snapshot-demo": "node scripts/snapshot-demo.mjs"
+    "snapshot-demo": "node scripts/snapshot-demo.mjs",
+    "send-link": "node scripts/send-link.mjs",
+    "watch-signin": "node scripts/watch-signin.mjs"
   },
   "repository": {
     "type": "git",

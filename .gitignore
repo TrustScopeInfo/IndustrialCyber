@@ -22,3 +22,7 @@ demos/
 # Internal brief. Names the gaps in the hosting setup, so it does not belong
 # in a public repo.
 CLAUDE-CODE-HANDOVER.md
+
+# Positioning brief. Names products, pricing gaps and sales strategy, so it does
+# not belong in a public repo, same reason as the handover above.
+BRIEF-v2.md

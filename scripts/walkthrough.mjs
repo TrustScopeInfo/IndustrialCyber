@@ -15,7 +15,7 @@ import { chromium } from 'playwright'
 import { createClient } from '@supabase/supabase-js'
 import { loadEnv, required } from './env.mjs'
 
-const BASE = process.env.WALKTHROUGH_BASE ?? 'http://localhost:3100'
+const BASE = process.env.WALKTHROUGH_BASE ?? 'http://localhost:3200'
 const SLUG = 'syrup-room'
 const WHO = 'walkthrough@example.invalid'
 
