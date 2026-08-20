@@ -37,11 +37,21 @@ const path = require('path')
 
 const FILE = path.resolve(__dirname, 'demos', 'syrup-room', 'index.html')
 
+// Every page is measured in all three architecture states. The network
+// architecture page draws different kit in each of them, and the zones page
+// changes its switch bar, its ESXi callout and every conduit status. A page
+// that does not change simply gets measured three times, which costs a few
+// seconds and removes a whole class of blind spot: state dependent content was
+// invisible to this audit from the day the three states were built.
+const STATES = [1, 2, 3]
+
 const TABS = {
   proc: { panel: 'p-proc', name: 'T470_T471 blend' },
   cip: { panel: 'p-cip', name: 'CIP 497' },
   arch: { panel: 'p-arch', name: 'System Platform infrastructure' },
-  na: { panel: 'p-na', name: 'Network architecture' },
+  // The attack propagation draws more of itself on every click, so each step is
+  // its own picture and none of them were being measured either.
+  na: { panel: 'p-na', name: 'Network architecture', steps: [0, 1, 2, 3, 4, 5] },
   net: { panel: 'p-net', name: 'Zones and conduits' },
 }
 
@@ -158,7 +168,7 @@ function measure(panelId) {
     if (el.tagName === 'path' && cs.fill !== 'none' && cs.fill !== 'rgba(0, 0, 0, 0)') continue
     if (!cs.stroke || cs.stroke === 'none') continue
     const sw = parseFloat(cs.strokeWidth)
-    if (!(sw >= 5)) continue
+    if (!(sw >= 2)) continue
     if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue
 
     const m = toUser(el)
@@ -345,11 +355,30 @@ async function main() {
     await page.click(`[role=tab][data-t="${tab}"]`)
     await page.waitForTimeout(400)
 
-    const data = await page.evaluate(measure, meta.panel)
-
     console.log(`\n${'='.repeat(70)}`)
     console.log(`${meta.name}   [${tab}]`)
     console.log('='.repeat(70))
+
+    // A page with architecture states draws a different picture in each one.
+    // Measuring only whichever happens to be selected leaves the rest unchecked.
+    for (const state of STATES) {
+      await page.evaluate((n) => {
+        setArch(n)
+        render()
+      }, state)
+      await page.waitForTimeout(250)
+
+      for (const step of meta.steps ?? [null]) {
+        if (step !== null) {
+          await page.evaluate((n) => {
+            naReset()
+            for (let i = 0; i < n; i++) naStep()
+          }, step)
+          await page.waitForTimeout(120)
+        }
+      console.log(`\narchitecture state ${state}${step !== null ? `, attack step ${step}` : ''}`)
+
+    const data = await page.evaluate(measure, meta.panel)
 
     if (data.error) {
       console.log(`could not measure: ${data.error}`)
@@ -407,6 +436,8 @@ async function main() {
       if (!list.length) continue
       console.log(`\n${kind}  (${list.length})`)
       for (const line of list) console.log(`  ${line}`)
+    }
+      }
     }
   }
 

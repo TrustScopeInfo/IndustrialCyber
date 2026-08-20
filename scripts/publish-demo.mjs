@@ -8,6 +8,7 @@
 // only for the website.
 
 import { readFileSync, existsSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { createClient } from '@supabase/supabase-js'
 import { loadEnv, required, projectRoot } from './env.mjs'
@@ -105,8 +106,38 @@ if (uploadError) {
   process.exit(1)
 }
 
+// Read it straight back and hash it. An upload that reports success can still
+// have put the wrong bytes there: a stale local read, an upsert that hit a
+// cached object, a truncated body. The demo is presented in front of a
+// customer, so 'it said OK' is not good enough.
+const sha = (buf) => createHash('sha256').update(buf).digest('hex')
+const localHash = sha(readFileSync(file))
+
+const { data: back, error: backError } = await db.storage.from(BUCKET).download(path)
+if (backError) {
+  console.error('')
+  console.error(`Uploaded, but could not read it back to verify: ${backError.message}`)
+  console.error('')
+  process.exit(1)
+}
+const remote = Buffer.from(await back.arrayBuffer())
+const remoteHash = sha(remote)
+
+if (remoteHash !== localHash) {
+  console.error('')
+  console.error('!'.repeat(64))
+  console.error('The bytes in the bucket do not match the file on disk.')
+  console.error(`  local   ${localHash}  ${bytes.toLocaleString()} bytes`)
+  console.error(`  bucket  ${remoteHash}  ${remote.length.toLocaleString()} bytes`)
+  console.error('The site would serve something other than what you just tested.')
+  console.error('!'.repeat(64))
+  console.error('')
+  process.exit(1)
+}
 console.log(`published ${demo.name}`)
 console.log(`  from  ${file}`)
 console.log(`  to    ${BUCKET}/${path}`)
 console.log(`  size  ${bytes.toLocaleString()} bytes`)
+console.log(`  sha   ${remoteHash}`)
+console.log('  hash  local and bucket match, verified by reading the object back')
 console.log(`\nIt is now served to signed in people who have a grant for '${slug}'.`)
