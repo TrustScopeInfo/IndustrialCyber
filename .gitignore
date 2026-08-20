@@ -26,3 +26,10 @@ CLAUDE-CODE-HANDOVER.md
 # Positioning brief. Names products, pricing gaps and sales strategy, so it does
 # not belong in a public repo, same reason as the handover above.
 BRIEF-v2.md
+
+# Cisco network topology icons, kept locally and never committed. The repo is
+# public and these are Cisco's marks, licensed use-but-do-not-alter. They are
+# already embedded in the demo HTML, which is itself ignored above, so nothing
+# here depends on the loose files. Provenance and how to regenerate them is in
+# ASSETS.md. Pattern rather than three filenames, so a fourth cannot slip in.
+cisco-*.svg
