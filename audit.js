@@ -51,7 +51,7 @@ const TABS = {
   arch: { panel: 'p-arch', name: 'System Platform infrastructure' },
   // The attack propagation draws more of itself on every click, so each step is
   // its own picture and none of them were being measured either.
-  na: { panel: 'p-na', name: 'Network architecture', steps: [0, 1, 2, 3, 4, 5] },
+  na: { panel: 'p-na', name: 'Network architecture', steps: [0, 1, 2, 3, 4, 5, 'conn'] },
   net: { panel: 'p-net', name: 'Zones and conduits' },
 }
 
@@ -343,6 +343,18 @@ async function main() {
   await page.goto('file://' + FILE, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(800)
 
+  // The demo runs on a tick that re-renders the overlay groups. Stage one
+  // stamps every measured element with data-audit; stage two finds them again
+  // by that stamp. A tick landing between the two throws the stamped nodes
+  // away and rebuilds them, so find() returned null and the pair was recorded
+  // as clear. Every candidate needing the hit test in a redrawn group, which
+  // means the whole attack overlay and the whole connectivity overlay, was
+  // being dropped in silence. Freeze the page first. The driver renders
+  // explicitly, so nothing is lost by stopping the clock.
+  await page.evaluate(() => {
+    for (let i = 1; i < 10000; i++) clearInterval(i)
+  })
+
   let total = 0
 
   for (const tab of tabs) {
@@ -371,12 +383,15 @@ async function main() {
       for (const step of meta.steps ?? [null]) {
         if (step !== null) {
           await page.evaluate((n) => {
+            // naConn toggles, so drive it to a known state rather than flipping.
+            if (S.na.conn) naConn()
             naReset()
-            for (let i = 0; i < n; i++) naStep()
+            if (n === 'conn') naConn()
+            else for (let i = 0; i < n; i++) naStep()
           }, step)
           await page.waitForTimeout(120)
         }
-      console.log(`\narchitecture state ${state}${step !== null ? `, attack step ${step}` : ''}`)
+      console.log(`\narchitecture state ${state}${step === null ? '' : step === 'conn' ? ', connectivity on' : `, attack step ${step}`}`)
 
     const data = await page.evaluate(measure, meta.panel)
 
