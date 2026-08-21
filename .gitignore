@@ -17,7 +17,7 @@ shots/
 
 # Demo HTML is never committed. It is served from a private Supabase bucket
 # behind the login, and kept locally for offline on-site presentations.
-demos/
+/demos/
 
 # Internal brief. Names the gaps in the hosting setup, so it does not belong
 # in a public repo.
